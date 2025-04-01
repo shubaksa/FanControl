@@ -49,6 +49,8 @@ typedef struct
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
+#define CONFIG_BASE_ADDR 0x08007800
+
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -180,6 +182,8 @@ int main(void)
 	uint8_t pwmStatus = 1;
 	float dutySum = 0.0;
 	float psuPwmDutyCycle = 1.0;
+	uint32_t adjustmentFactor = 10;	
+	uint32_t adjustmentConfiguration = 0;
 	
   /* USER CODE END 1 */
 
@@ -210,6 +214,11 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
+	adjustmentConfiguration = *((uint32_t*)CONFIG_BASE_ADDR);
+	
+	if ((adjustmentConfiguration & 0xFFFFFF00) == 0xAABBCC00)
+		adjustmentFactor = adjustmentConfiguration & 0xFF;
+	
   memset(readingsFanTach, 0, 16 * sizeof(_reading));
   memset(measurementsFanTach, 0, 16 * sizeof(_measure));
 	memset(readingsPsuPwm, 0, 16 * sizeof(_reading));
@@ -262,7 +271,7 @@ int main(void)
 	  }
 	  else
 	  {
-		  TIM16->PSC = 48000000.0 / (74*psuPwmDutyCycle*freqSum / 16.0);
+		  TIM16->PSC = 48000000.0 / (adjustmentFactor*psuPwmDutyCycle*freqSum / 16.0);
 		  
 		  if (!pwmStatus)
 		  {
