@@ -190,25 +190,6 @@ int main(void)
 	  for (i = 0; i < 16; ++i)
 		  freqSum += measurements[i].freq;
 
-/*	  
-	  if (freqSum < 600) // fan frequency average < 1125 RPM
-	  {
-		  if (pwmStatus)
-			{
-				HAL_TIM_PWM_Stop(&htim16, TIM_CHANNEL_1);
-				pwmStatus = 0;
-			}
-	  }
-	  else
-	  {
-		  if (!pwmStatus)
-		  {
-			  HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
-			  pwmStatus = 1;	
-		  }
-	  }
-*/
-
 	  if (freqSum < 400) // prevent prescaler register overflow
 	  {
 		  if (pwmStatus)
