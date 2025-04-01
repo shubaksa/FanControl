@@ -54,15 +54,21 @@ typedef struct
 /* Private variables ---------------------------------------------------------*/
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim16;
-DMA_HandleTypeDef hdma_tim1_ch2;
+DMA_HandleTypeDef hdma_tim1_ch1;
+DMA_HandleTypeDef hdma_tim3_ch1;
 
 /* USER CODE BEGIN PV */
 
+uint32_t clock = 0;
 uint32_t timerFreq = 0;
-uint8_t idxReading = 0;
-_reading readings[16];
-_measure measurements[16];
+uint8_t idxReadingFanTach = 0;
+uint8_t idxReadingPsuPwm = 0;
+_reading readingsFanTach[16];
+_measure measurementsFanTach[16];
+_reading readingsPsuPwm[16];
+_measure measurementsPsuPwm[16];
 
 /* USER CODE END PV */
 
@@ -72,6 +78,7 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM16_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -79,12 +86,12 @@ static void MX_TIM16_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-void AdvanceDMAMemoryLocation()
+inline void AdvanceFanTachDMAMemoryLocation()
 {
-	if (++idxReading >= 16)
+	if (++idxReadingFanTach >= 16)
 	{
-		DMA1_Channel1->CMAR = (uint32_t)readings;
-		idxReading = 0;
+		DMA1_Channel1->CMAR = (uint32_t)readingsFanTach;
+		idxReadingFanTach = 0;
 	}
 	else
 	{
@@ -92,34 +99,69 @@ void AdvanceDMAMemoryLocation()
 	}
 }
 
+inline void AdvancePsuPwmDMAMemoryLocation()
+{
+	if (++idxReadingPsuPwm >= 16)
+	{
+		DMA1_Channel2->CMAR = (uint32_t)readingsPsuPwm;
+		idxReadingPsuPwm = 0;
+	}
+	else
+	{
+		DMA1_Channel2->CMAR += sizeof(_reading);
+	}
+}
+
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
-	if (htim->Instance == TIM1)
+	if (htim->Instance == TIM3)
 	{
-		if (readings[idxReading].ch1 != 0)
+		if (readingsFanTach[idxReadingFanTach].ch1 != 0)
 		{
-			measurements[idxReading].duty = readings[idxReading].ch2 * 100.0 / readings[idxReading].ch1;
-			measurements[idxReading].freq = (timerFreq / readings[idxReading].ch1);
+			measurementsFanTach[idxReadingFanTach].duty = readingsFanTach[idxReadingFanTach].ch2 * 100.0 / readingsFanTach[idxReadingFanTach].ch1;
+			measurementsFanTach[idxReadingFanTach].freq = (timerFreq / readingsFanTach[idxReadingFanTach].ch1);
 		}
 		else
 		{
-			measurements[idxReading].duty = 0;
-			measurements[idxReading].freq = 0;			
+			measurementsFanTach[idxReadingFanTach].duty = 100;
+			measurementsFanTach[idxReadingFanTach].freq = 0;			
 		}
 
-		AdvanceDMAMemoryLocation();
+		AdvanceFanTachDMAMemoryLocation();
+	}
+	else if (htim->Instance == TIM1)
+	{		
+		if (readingsPsuPwm[idxReadingPsuPwm].ch1 != 0)
+		{
+			measurementsPsuPwm[idxReadingPsuPwm].duty = readingsPsuPwm[idxReadingPsuPwm].ch2 * 100.0 / readingsPsuPwm[idxReadingPsuPwm].ch1;
+			measurementsPsuPwm[idxReadingPsuPwm].freq = (clock / readingsPsuPwm[idxReadingPsuPwm].ch1);
+		}
+		else
+		{
+			measurementsPsuPwm[idxReadingPsuPwm].duty = 100;
+			measurementsPsuPwm[idxReadingPsuPwm].freq = 0;			
+		}
+
+		AdvancePsuPwmDMAMemoryLocation();
 	}
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	if (htim->Instance == TIM1)
+	if (htim->Instance == TIM3)
 	{
-		measurements[idxReading].duty = 0;
-		measurements[idxReading].freq = 0;			
+		measurementsFanTach[idxReadingFanTach].duty = 100;
+		measurementsFanTach[idxReadingFanTach].freq = 0;			
 
-		AdvanceDMAMemoryLocation();
+		AdvanceFanTachDMAMemoryLocation();
 	}
+	else if (htim->Instance == TIM1)
+	{
+		measurementsPsuPwm[idxReadingPsuPwm].duty = 100;
+		measurementsPsuPwm[idxReadingPsuPwm].freq = 0;			
+
+		AdvancePsuPwmDMAMemoryLocation();
+	} 
 }
 
 /* USER CODE END 0 */
@@ -136,6 +178,8 @@ int main(void)
 	uint8_t i = 0;
 	uint32_t freqSum = 0;
 	uint8_t pwmStatus = 1;
+	float dutySum = 0.0;
+	float psuPwmDutyCycle = 1.0;
 	
   /* USER CODE END 1 */
 
@@ -153,7 +197,8 @@ int main(void)
 
   /* USER CODE BEGIN SysInit */
 
-	timerFreq = HAL_RCC_GetHCLKFreq() / 183; // adjusted for prescaler of TIM1
+	clock = HAL_RCC_GetHCLKFreq();
+	timerFreq = clock / 183; // adjusted for prescaler of TIM1
 	
   /* USER CODE END SysInit */
 
@@ -162,22 +207,30 @@ int main(void)
   MX_DMA_Init();
   MX_TIM1_Init();
   MX_TIM16_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
-  memset(readings, 0, 16 * sizeof(_reading));
-  memset(measurements, 0, 16 * sizeof(_measure));
+  memset(readingsFanTach, 0, 16 * sizeof(_reading));
+  memset(measurementsFanTach, 0, 16 * sizeof(_measure));
+	memset(readingsPsuPwm, 0, 16 * sizeof(_reading));
+	memset(measurementsPsuPwm, 0, 16 * sizeof(_measure));
 	
   HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
-
+	
+	HAL_TIM_Base_Start_IT(&htim3);
+  HAL_TIM_IC_Start_DMA(&htim3, TIM_CHANNEL_1, (uint32_t *)readingsFanTach, 2);
+	HAL_TIM_IC_Start(&htim3, TIM_CHANNEL_2);
+	
 	HAL_TIM_Base_Start_IT(&htim1);
-  HAL_TIM_IC_Start_DMA(&htim1, TIM_CHANNEL_2, (uint32_t *)readings, 2);
+	HAL_TIM_IC_Start_DMA(&htim1, TIM_CHANNEL_1, (uint32_t *)readingsPsuPwm, 2);
+	HAL_TIM_IC_Start(&htim1, TIM_CHANNEL_2);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	
-  HAL_Delay(500);
+  HAL_Delay(1500);
 	
   while (1)
   {
@@ -186,10 +239,19 @@ int main(void)
     /* USER CODE BEGIN 3 */
 	  
 	  freqSum = 0;
+	  dutySum = 0;
 	  
 	  for (i = 0; i < 16; ++i)
-		  freqSum += measurements[i].freq;
-
+    {
+	    freqSum += measurementsFanTach[i].freq;
+	    dutySum += measurementsPsuPwm[i].duty;
+    }
+	  
+	  psuPwmDutyCycle = dutySum / 1600.0;
+	  
+	  if (psuPwmDutyCycle < 0.01 || psuPwmDutyCycle > 1)
+		  psuPwmDutyCycle = 1.0;
+	  
 	  if (freqSum < 400) // prevent prescaler register overflow
 	  {
 		  if (pwmStatus)
@@ -200,7 +262,7 @@ int main(void)
 	  }
 	  else
 	  {
-		  TIM16->PSC = 48000000.0 / (36*freqSum / 16.0);
+		  TIM16->PSC = 48000000.0 / (74*psuPwmDutyCycle*freqSum / 16.0);
 		  
 		  if (!pwmStatus)
 		  {
@@ -273,7 +335,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 182;
+  htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -293,7 +355,7 @@ static void MX_TIM1_Init(void)
     Error_Handler();
   }
   sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
-  sSlaveConfig.InputTrigger = TIM_TS_TI2FP2;
+  sSlaveConfig.InputTrigger = TIM_TS_TI1FP1;
   sSlaveConfig.TriggerPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
   sSlaveConfig.TriggerPrescaler = TIM_ICPSC_DIV1;
   sSlaveConfig.TriggerFilter = 0;
@@ -301,16 +363,16 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_FALLING;
-  sConfigIC.ICSelection = TIM_ICSELECTION_INDIRECTTI;
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
+  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
   sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
   sConfigIC.ICFilter = 0;
   if (HAL_TIM_IC_ConfigChannel(&htim1, &sConfigIC, TIM_CHANNEL_1) != HAL_OK)
   {
     Error_Handler();
   }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
-  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_FALLING;
+  sConfigIC.ICSelection = TIM_ICSELECTION_INDIRECTTI;
   if (HAL_TIM_IC_ConfigChannel(&htim1, &sConfigIC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
@@ -328,6 +390,83 @@ static void MX_TIM1_Init(void)
 	__HAL_TIM_URS_ENABLE(&htim1);
 	
   /* USER CODE END TIM1_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_SlaveConfigTypeDef sSlaveConfig = {0};
+  TIM_IC_InitTypeDef sConfigIC = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 182;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_IC_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
+  sSlaveConfig.InputTrigger = TIM_TS_TI1FP1;
+  sSlaveConfig.TriggerPolarity = TIM_INPUTCHANNELPOLARITY_FALLING;
+  sSlaveConfig.TriggerPrescaler = TIM_ICPSC_DIV1;
+  sSlaveConfig.TriggerFilter = 0;
+  if (HAL_TIM_SlaveConfigSynchro(&htim3, &sSlaveConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_FALLING;
+  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
+  sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
+  sConfigIC.ICFilter = 0;
+  if (HAL_TIM_IC_ConfigChannel(&htim3, &sConfigIC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
+  sConfigIC.ICSelection = TIM_ICSELECTION_INDIRECTTI;
+  if (HAL_TIM_IC_ConfigChannel(&htim3, &sConfigIC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+	__HAL_TIM_CLEAR_FLAG(&htim3, TIM_FLAG_UPDATE);
+	__HAL_TIM_URS_ENABLE(&htim3);
+
+  /* USER CODE END TIM3_Init 2 */
 
 }
 
@@ -407,6 +546,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel2_3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel2_3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
 
 }
 
@@ -422,6 +564,7 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */

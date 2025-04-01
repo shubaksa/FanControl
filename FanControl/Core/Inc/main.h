@@ -61,6 +61,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define PSU_TACH_OUT_Pin GPIO_PIN_7
 #define PSU_TACH_OUT_GPIO_Port GPIOB
+#define PSU_PWM_IN_Pin GPIO_PIN_8
+#define PSU_PWM_IN_GPIO_Port GPIOA
 #define FAN_TACH_IN_Pin GPIO_PIN_6
 #define FAN_TACH_IN_GPIO_Port GPIOB
 
