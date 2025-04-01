@@ -1,0 +1,6 @@
+# VisualGDB MSBuild Projects
+.vs/
+.visualgdb/
+VisualGDB/
+
+build/
