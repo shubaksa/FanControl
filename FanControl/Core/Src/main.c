@@ -50,6 +50,10 @@ typedef struct
 /* USER CODE BEGIN PM */
 
 #define CONFIG_BASE_ADDR 0x08007800
+#define CONFIG_MAGICWORD 0
+#define CONFIG_TARGET_RPM_OFFSET 1
+#define CONFIG_FAN_RPM_OFFSET 2
+#define CONFIG_INITDELAY_OFFSET 3
 
 /* USER CODE END PM */
 
@@ -182,8 +186,11 @@ int main(void)
 	uint8_t pwmStatus = 1;
 	float dutySum = 0.0;
 	float psuPwmDutyCycle = 1.0;
-	uint32_t adjustmentFactor = 10;	
-	uint32_t adjustmentConfiguration = 0;
+	float adjustmentFactor = 1.0;	
+	
+	uint32_t *configBase = (uint32_t*)CONFIG_BASE_ADDR;
+	uint32_t targetRpm = 18000;
+	uint32_t initDelay = 5000;
 	
   /* USER CODE END 1 */
 
@@ -214,10 +221,14 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
-	adjustmentConfiguration = *((uint32_t*)CONFIG_BASE_ADDR);
-	
-	if ((adjustmentConfiguration & 0xFFFFFF00) == 0xAABBCC00)
-		adjustmentFactor = adjustmentConfiguration & 0xFF;
+	if (*(configBase + CONFIG_MAGICWORD) == 0xAABBCCDD)
+	{
+		targetRpm = *(configBase + CONFIG_TARGET_RPM_OFFSET);
+		adjustmentFactor = (float)targetRpm / (float)*(configBase + CONFIG_FAN_RPM_OFFSET);
+		initDelay = *(configBase + CONFIG_INITDELAY_OFFSET);
+		
+		TIM16->PSC = (float)clock / (targetRpm / 60 * 2 * 10) + 1;
+	}
 	
   memset(readingsFanTach, 0, 16 * sizeof(_reading));
   memset(measurementsFanTach, 0, 16 * sizeof(_measure));
@@ -239,7 +250,7 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	
-  HAL_Delay(1500);
+  HAL_Delay(initDelay);
 	
   while (1)
   {
@@ -271,7 +282,7 @@ int main(void)
 	  }
 	  else
 	  {
-		  TIM16->PSC = 48000000.0 / (adjustmentFactor*psuPwmDutyCycle*freqSum / 16.0);
+		  TIM16->PSC = (float)clock / (adjustmentFactor*psuPwmDutyCycle*freqSum / 1.6) + 1;
 		  
 		  if (!pwmStatus)
 		  {
